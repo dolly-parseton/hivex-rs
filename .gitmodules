@@ -1,0 +1,3 @@
+[submodule "hivex-sys/hivex"]
+	path = hivex-sys/hivex
+	url = https://github.com/libguestfs/hivex.git
