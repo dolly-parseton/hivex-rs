@@ -2,7 +2,7 @@ use std::{env, path::PathBuf, process::Command};
 
 fn main() {
     println!("cargo:rerun-if-changed=./build.rs");
-    println!("cargo:rerun-if-changed=./src/lib.rs");
+    // println!("cargo:rerun-if-changed=./src/lib.rs");
 
     let dst = PathBuf::from(env::var("OUT_DIR").unwrap());
     // Clean Source
