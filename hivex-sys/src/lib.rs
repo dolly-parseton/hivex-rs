@@ -11,8 +11,7 @@ include!(concat!(env!("OUT_DIR"), "/bindings.rs"));
 mod error;
 
 // Uses
-use byteorder::{ByteOrder, LittleEndian};
-use std::{collections::HashMap, ffi, path, ptr};
+use std::{ffi, path};
 // Structs
 pub type Result<T> = std::result::Result<T, error::Error>;
 pub struct Hive {
@@ -71,14 +70,16 @@ pub fn root(hive: *mut hive_h) -> Result<hive_node_h> {
 }
 
 // Does not work on test_data2 for unknown reasons.
-// /// Wraps 'hivex_last_modified' function, returns Ok if successful and an error on failure
-// /// * Todo, add error parsing from errno.
-// pub fn last_modified(hive: *mut hive_h) -> Result<i64> {
-//     match unsafe { hivex_last_modified(hive) } {
-//         0 => Err(error::Error::hivex_error("hivex_last_modified")),
-//         n => Ok(n),
-//     }
-// }
+/// Wraps 'hivex_last_modified' function, returns Ok if successful and an error on failure
+/// * Todo, add error parsing from errno.
+pub fn last_modified(hive: *mut hive_h) -> Result<i64> {
+    // println!("{:?}", unsafe { hivex_last_modified(hive) });
+    Ok(unsafe { hivex_last_modified(hive) })
+    // match unsafe { hivex_last_modified(hive) } {
+    //     0 => Err(error::Error::hivex_error("hivex_last_modified")),
+    //     n => Ok(n),
+    // }
+}
 
 /// Wraps 'hivex_node_name' function, returns Ok if successful and an error on failure
 /// * Todo, add error parsing from errno.
@@ -102,31 +103,42 @@ pub fn node_last_modified(hive: *mut hive_h, node: u64) -> Result<i64> {
 /// Wraps 'hivex_node_children' function, returns Ok if successful.
 /// Also contains 'hivex_node_children'
 /// No error handling here however that may need to be readdressed after testing.
-pub fn node_children(hive: *mut hive_h, node: u64) -> Result<Vec<*mut hive_node_h>> {
-    let res: *mut u64 = unsafe { hivex_node_children(hive, node) };
-    let n = unsafe { hivex_node_children(hive, node) as usize };
-    let slice = unsafe { std::slice::from_raw_parts(res, n) };
-    Ok(slice.to_owned())
+pub fn node_children(hive: *mut hive_h, node: u64) -> Result<Vec<hive_node_h>> {
+    let res = unsafe { hivex_node_children(hive, node) };
+    let n = unsafe { hivex_node_nr_children(hive, node) };
+    // Fail if null
+    match res.is_null() && n != 0 {
+        true => Err(error::Error::hivex_error("hivex_node_children")),
+        false => {
+            let slice = unsafe { std::slice::from_raw_parts(res, n as usize) };
+            // println!("{:?}", slice);
+            Ok(slice.to_vec())
+        }
+    }
 }
 
 /// Wraps 'hivex_node_parent' function, returns Ok if successful.
 /// * Todo, add error parsing from errno.
-pub fn node_parent(hive: *mut hive_h, node: u64) -> Result<u64> {
+pub fn node_parent(hive: *mut hive_h, node: hive_node_h) -> Result<u64> {
     match unsafe { hivex_node_parent(hive, node) } {
         0 => Err(error::Error::hivex_error("hivex_node_parent")),
         n => Ok(n),
     }
 }
 
-// /// Wraps 'hivex_node_values' function, returns Ok if successful.
-// /// Also contains 'hivex_node_nr_values'
-// /// No error handling here however that may need to be readdressed after testing.
-// pub fn node_values(hive: *mut hive_h, node: u64) -> Result<Vec<u64>> {
-//     let res: *mut u64 = unsafe { hivex_node_values(hive, node) };
-//     let n = unsafe { hivex_node_nr_values(hive, node) as usize };
-//     let slice = unsafe { std::slice::from_raw_parts(res, n) };
-//     Ok(slice.to_owned())
-// }
+/// Wraps 'hivex_node_values' function, returns Ok if successful.
+/// Also contains 'hivex_node_nr_values'
+pub fn node_values(hive: *mut hive_h, node: hive_node_h) -> Result<Vec<hive_value_h>> {
+    let res = unsafe { hivex_node_values(hive, node) };
+    let n = unsafe { hivex_node_nr_values(hive, node) };
+    match res.is_null() {
+        true => Err(error::Error::hivex_error("hivex_node_values")),
+        false => {
+            let slice = unsafe { std::slice::from_raw_parts(res, n as usize) };
+            Ok(slice.to_vec())
+        }
+    }
+}
 
 /// Wraps 'hivex_value_key' function, returns Ok if successful and an error on failure
 /// * Todo, add error parsing from errno.
@@ -141,34 +153,60 @@ pub fn value_key(hive: *mut hive_h, value: u64) -> Result<String> {
     }
 }
 
-// Do I need todo type as it's own thing?
-
-pub fn node_values(hive: *mut hive_h, node: u64) {
-    use std::convert::TryInto;
-    let n: usize = unsafe { hivex_node_nr_values(hive, node).try_into().unwrap() };
-    let res = unsafe { hivex_node_values(hive, node) };
-    println!("{:?} {:?}", res, n);
-    let slice = unsafe { std::slice::from_raw_parts(res, n) };
-    println!("{:?}", slice);
+/// Wraps 'hivex_value_type' function, returns Ok with the type and len if successful and an error on failure
+/// * Todo, add error parsing from errno.
+pub fn value_type_len(hive: *mut hive_h, value: u64) -> Result<(hive_type, u64)> {
+    // Get type (u32)
+    let v_type_ptr: *mut hive_type = &mut hive_type::hive_t_REG_NONE;
+    let v_len_ptr: *mut u64 = &mut 0;
+    let _ = unsafe { hivex_value_type(hive, value, v_type_ptr, v_len_ptr) };
+    match v_type_ptr.is_null() && v_len_ptr.is_null() {
+        true => Err(error::Error::hivex_error("hivex_value_type")),
+        false => Ok(unsafe { (*v_type_ptr, *v_len_ptr) }),
+    }
 }
 
 /// Wraps 'hivex_value_value' function, returns Ok if successful and an error on failure
 /// * Todo, add error parsing from errno.
-pub fn value_value(hive: *mut hive_h, value: u64) -> Result<String> {
+pub fn value_value(hive: *mut hive_h, value: u64) -> Result<Vec<i8>> {
     // Get type (u32)
-    let type_ptr = std::ptr::null_mut();
-    let len_ptr = std::ptr::null_mut();
-    // let value_type = unsafe { hivex_value_type(hive, value, type_ptr, len_ptr) };
-    // Get size
-
-    // Get value value as Vec<u8>, can cast to type in rs crate
-    let res = unsafe { hivex_value_value(hive, value, type_ptr, len_ptr) };
+    let (mut v_type, mut v_len) = value_type_len(hive, value)?;
+    let res = unsafe { hivex_value_value(hive, value, &mut v_type, &mut v_len) };
     match res.is_null() {
         true => Err(error::Error::hivex_error("hivex_value_value")),
-        false => match unsafe { ffi::CString::from_raw(res) }.into_string() {
+        false => {
+            //
+            let slice = unsafe { std::slice::from_raw_parts(res, v_len as usize) };
+            Ok(slice.to_vec())
+        }
+    }
+}
+
+mod value {
+    use super::*;
+    pub fn string(hive: *mut hive_h, value: u64) -> Result<String> {
+        let res = unsafe { hivex_value_string(hive, value) };
+        let c_string = unsafe { ffi::CString::from_raw(res) };
+        match c_string.into_string() {
             Ok(s) => Ok(s),
             Err(e) => Err(error::Error::ffi_error(e)),
-        },
+        }
+    }
+    pub fn strings(hive: *mut hive_h, value: u64) -> Result<Vec<String>> {
+        let res = unsafe { hivex_value_string(hive, value) };
+        let c_strings = unsafe { ffi::CString::from_raw(res) };
+        match c_strings.into_string() {
+            Ok(s) => Ok(s.split("\0").map(|v| v.to_string()).collect()),
+            Err(e) => Err(error::Error::ffi_error(e)),
+        }
+    }
+    pub fn dword(hive: *mut hive_h, value: u64) -> Result<i32> {
+        let res = unsafe { hivex_value_string(hive, value) };
+        Ok(unsafe { (*res).into() })
+    }
+    pub fn qword(hive: *mut hive_h, value: u64) -> Result<i64> {
+        let res = unsafe { hivex_value_string(hive, value) };
+        Ok(unsafe { (*res).into() })
     }
 }
 
@@ -182,58 +220,61 @@ mod tests {
     use super::*;
     #[test]
     fn hive_open() {
-        let res = open("../../test_data2");
-        println!("{:?}", res);
+        let res = open("../test_data/SOFTWARE");
+        // println!("{:?}", res);
         assert!(res.is_ok());
     }
 
     #[test]
     fn hive_close() {
-        let hive: Result<*mut hive_h> = open("../../test_data2");
+        let hive: Result<*mut hive_h> = open("../test_data/SOFTWARE");
+        // println!("{:?}", hive);
         assert!(hive.is_ok());
         assert!(close(hive.unwrap()).is_ok());
     }
 
     #[test]
     fn hive_root() {
-        let hive: Result<*mut hive_h> = open("../../test_data2");
+        let hive: Result<*mut hive_h> = open("../test_data/SOFTWARE");
         assert!(hive.is_ok());
         let hive = hive.unwrap();
         let root = root(hive);
+        // println!("{:?}", root);
         assert!(root.is_ok());
         assert!(close(hive).is_ok());
     }
 
     // Disabled until bug is understood
-    // #[test]
-    // fn hivex_last_modified() {
-    //     let hive: Result<*mut hive_h> = open("../../test_data2");
-    //     assert!(hive.is_ok());
-    //     let hive = hive.unwrap();
-    //     let last_modified = last_modified(hive);
-    //     println!("{:?}", last_modified);
-    //     assert!(last_modified.is_ok());
-    //     assert!(close(hive).is_err());
-    // }
+    #[test]
+    fn hivex_last_modified() {
+        let hive: Result<*mut hive_h> = open("../test_data/SOFTWARE");
+        assert!(hive.is_ok());
+        let hive = hive.unwrap();
+        // println!("a {:?}", hive);
+        let last_modified = last_modified(hive);
+        // println!("b {:?}", last_modified);
+        assert!(last_modified.is_ok());
+        assert!(close(hive).is_ok());
+    }
 
     #[test]
     fn hive_node_last_modified() {
-        let hive: Result<*mut hive_h> = open("../../test_data2");
+        let hive: Result<*mut hive_h> = open("../test_data/SOFTWARE");
         assert!(hive.is_ok());
         let hive = hive.unwrap();
         let root = root(hive);
         assert!(root.is_ok());
         let root = root.unwrap();
         let lm = node_last_modified(hive, root);
-        println!("{:?}", lm);
+        // println!("{:?}", lm);
         assert!(lm.is_ok());
-        println!("{:?}", convert_windows_to_epoch(lm.unwrap()));
+        // println!("{:?}", convert_windows_to_epoch(lm.unwrap()));
         assert!(close(hive).is_ok());
     }
 
     #[test]
     fn hive_values() {
-        let hive: Result<*mut hive_h> = open("../../test_data2");
+        let hive: Result<*mut hive_h> = open("../test_data/SOFTWARE");
         assert!(hive.is_ok());
         let hive = hive.unwrap();
         let root = root(hive);
@@ -241,10 +282,35 @@ mod tests {
         let root = root.unwrap();
 
         let child = node_children(hive, root);
+        println!("{:?}", child);
         assert!(child.is_ok());
         let child = child.unwrap()[0];
 
         let values = node_values(hive, child);
-        assert!(close(hive).is_err());
+        println!("{:?}", values);
+        assert!(close(hive).is_ok());
+    }
+
+    #[test]
+    fn hive_value_type() {
+        let hive: Result<*mut hive_h> = open("../test_data/SOFTWARE");
+        assert!(hive.is_ok());
+        let hive = hive.unwrap();
+        let root = root(hive);
+        assert!(root.is_ok());
+        let root = root.unwrap();
+
+        let child = node_children(hive, root);
+        println!("{:?}", child);
+        assert!(child.is_ok());
+        let child = child.unwrap()[0];
+
+        let values = node_values(hive, child);
+        println!("{:?}", values);
+
+        let v_type = value_type_len(hive, values.unwrap()[0]);
+        println!("{:?}", v_type);
+
+        assert!(close(hive).is_ok());
     }
 }
