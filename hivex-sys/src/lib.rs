@@ -182,7 +182,7 @@ pub fn value_value(hive: *mut hive_h, value: u64) -> Result<Vec<i8>> {
     }
 }
 
-mod value {
+pub mod value {
     use super::*;
     pub fn string(hive: *mut hive_h, value: u64) -> Result<String> {
         let res = unsafe { hivex_value_string(hive, value) };
@@ -193,26 +193,39 @@ mod value {
         }
     }
     pub fn strings(hive: *mut hive_h, value: u64) -> Result<Vec<String>> {
-        let res = unsafe { hivex_value_string(hive, value) };
-        let c_strings = unsafe { ffi::CString::from_raw(res) };
-        match c_strings.into_string() {
-            Ok(s) => Ok(s.split("\0").map(|v| v.to_string()).collect()),
-            Err(e) => Err(error::Error::ffi_error(e)),
+        let res = unsafe { hivex_value_multiple_strings(hive, value) };
+        // Calculate len of resulting array - There may very well be a nicer way to go about this but I cannot find anything atm.
+        // Iterate over and find _, 0, 0, 0 to determine null terminated ascii strings. I'm assuming no values > 127 are expected here hence not doing smarter checks on null terminators.
+        let data = value_value(hive, value)?;
+        let mut n = 0;
+        for (i, j) in (4..data.len()).enumerate() {
+            if let [_, 0, 0, 0] = &data[i..j] {
+                n += 1;
+            }
         }
+        let mut strings = Vec::new();
+        let array: &[*mut i8] = unsafe { std::slice::from_raw_parts(res, n) };
+        for i in array {
+            let c_string = unsafe { ffi::CString::from_raw(*i) };
+            match c_string.into_string() {
+                Ok(s) => strings.push(s),
+                Err(e) => return Err(error::Error::ffi_error(e)),
+            }
+        }
+        Ok(strings)
     }
     pub fn dword(hive: *mut hive_h, value: u64) -> Result<i32> {
-        let res = unsafe { hivex_value_string(hive, value) };
-        Ok(unsafe { (*res).into() })
+        let res = unsafe { hivex_value_dword(hive, value) };
+        Ok(res)
     }
     pub fn qword(hive: *mut hive_h, value: u64) -> Result<i64> {
-        let res = unsafe { hivex_value_string(hive, value) };
-        Ok(unsafe { (*res).into() })
+        let res = unsafe { hivex_value_qword(hive, value) };
+        Ok(res)
     }
 }
 
-pub fn convert_windows_to_epoch(ticks: i64) -> Result<u64> {
-    use std::convert::TryInto;
-    Ok((ticks / 10000000 - 11644473600).try_into()?)
+pub fn convert_windows_to_epoch(ticks: i64) -> Result<i64> {
+    Ok(ticks / 10000000 - 11644473600)
 }
 
 #[cfg(test)]
