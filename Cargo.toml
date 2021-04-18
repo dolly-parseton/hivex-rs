@@ -11,4 +11,6 @@ name = "hivex-rs"
 
 [dependencies]
 chrono = "0.4"
+errno = "0.2.7"
 hivex-sys = {path = "hivex-sys"}
+structopt = {version = "0.3", default-features = false}
