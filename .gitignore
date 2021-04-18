@@ -19,4 +19,6 @@
 
 
 # Do not commit hivex-sys/hivex since it is a submodule
-/hivex-sys/hivex
+hivex-sys/hivex
+
+.test_data
